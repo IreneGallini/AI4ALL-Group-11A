@@ -37,5 +37,52 @@ energy-forecasting/
 └── README.md
 ```
 
-For the API key, I'd recommend each person create a .env file (already gitignored by default) with:
-EIA_API_KEY=your_key_here
+---
+
+## Setting up
+
+### Create the conda environment
+
+This installs Python and all the packages the project needs.
+
+```bash
+conda env create -f environment.yml
+```
+
+Then activate it (you'll need to do this every time you open a new terminal):
+
+```bash
+conda activate ai4all-11a
+```
+
+
+### Get a free EIA API key
+
+1. Go to https://www.eia.gov/opendata/ and click **Register**
+2. Fill out the form — it's free and instant
+3. Your API key will be emailed to you
+
+
+### Add your API key
+
+1. In the project folder, copy the example file
+
+2. Open `.env` and replace `your_key_here` with your actual key:
+`.env` is gitignored — it will never be committed, so your key stays private.
+
+
+### Set up your Jupyter kernel
+
+This makes Jupyter use the project environment instead of your system Python:
+
+```bash
+python -m ipykernel install --user --name ai4all-11a --display-name "Python (ai4all-11a)"
+```
+
+Then launch JupyterLab:
+
+```bash
+jupyter lab
+```
+
+Open your notebook in `notebooks/`, click the kernel name in the top-right corner, and select **Python (ai4all-11a)**.
