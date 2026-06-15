@@ -1,0 +1,14 @@
+name: ai4all-11a
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - pandas>=2.2
+  - requests>=2.32
+  - python-dotenv>=1.0
+  - matplotlib>=3.9
+  - seaborn>=0.13
+  - scikit-learn>=1.5
+  - jupyterlab>=4.2

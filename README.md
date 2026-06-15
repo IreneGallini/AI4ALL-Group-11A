@@ -36,3 +36,6 @@ energy-forecasting/
 ├── environment.yml
 └── README.md
 ```
+
+For the API key, I'd recommend each person create a .env file (already gitignored by default) with:
+EIA_API_KEY=your_key_here
