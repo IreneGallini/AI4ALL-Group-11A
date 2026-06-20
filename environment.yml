@@ -12,3 +12,8 @@ dependencies:
   - seaborn>=0.13
   - scikit-learn>=1.5
   - jupyterlab>=4.2
+  - pip
+  - pip:
+      - openmeteo-requests
+      - requests-cache
+      - retry-requests
