@@ -5,3 +5,5 @@ notebooks/.cache.sqlite
 notebooks/.ipynb_checkpoints/
 .ipynb_checkpoints/
 .DS_Store
+
+Miniconda3-latest-MacOSX-arm64.sh
