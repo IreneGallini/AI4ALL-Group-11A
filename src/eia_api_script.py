@@ -9,7 +9,7 @@ Usage:
 
 import os
 import requests
-import pandas as pd1
+import pandas as pd
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import time
@@ -40,67 +40,73 @@ REGIONS = [
 
 OUTPUT_FILE = "data/raw/eia_energy_data.csv"
 
-# EIA Grid Monitor endpoint (v2)
-BASE_URL = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
+# EIA Grid Monitor endpoints (v2)
+REGION_URL    = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
+FUELTYPE_URL  = "https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/"
 
-# respondent = balancing authority code
-# type codes:
-#   D  = Demand (electricity consumption)
-#   NG = Net Generation
-#   SUN = Solar generation
-#   WND = Wind generation
-
-TYPE_LABELS = {
-    "D":   "demand_mwh",
-    "SUN": "solar_gen_mwh",
-    "WND": "wind_gen_mwh",
-}
+# Demand comes from region-data (facets[type][])
+# Solar/wind come from fuel-type-data (facets[fueltype][])
+DEMAND_TYPES = {"D": "demand_mwh"}
+FUELTYPE_LABELS = {"SUN": "solar_gen_mwh", "WND": "wind_gen_mwh"}
 
 
-def fetch_series(region: str, type_code: str) -> pd.DataFrame:
-    """Fetch a single (region, type) time series from the EIA v2 API."""
-    params = {
-        "api_key":          EIA_API_KEY,
-        "frequency":        "hourly",
-        "data[0]":          "value",
-        "facets[respondent][]": region,
-        "facets[type][]":   type_code,
-        "start":            START_STR,
-        "end":              END_STR,
-        "sort[0][column]":  "period",
-        "sort[0][direction]": "asc",
-        "length":           5000,           # max rows per request
-        "offset":           0,
-    }
-
+def _paginate(url: str, params: dict) -> list:
+    """Fetch all pages from an EIA v2 endpoint and return raw row list."""
     all_rows = []
     while True:
-        resp = requests.get(BASE_URL, params=params, timeout=30)
+        resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
         body = resp.json()
-
         data = body.get("response", {}).get("data", [])
         if not data:
             break
-
         all_rows.extend(data)
-
-        # Paginate if needed
-        total   = int(body["response"].get("total", len(all_rows)))
-        offset  = params["offset"] + len(data)
+        total  = int(body["response"].get("total", len(all_rows)))
+        offset = params["offset"] + len(data)
         if offset >= total:
             break
         params["offset"] = offset
-        time.sleep(0.2)   # be polite to the API
+        time.sleep(0.2)
+    return all_rows
 
-    if not all_rows:
-        print(f"  ⚠  No data for {region} / {type_code}")
+
+def fetch_demand(region: str) -> pd.DataFrame:
+    """Fetch hourly demand from /rto/region-data/."""
+    params = {
+        "api_key": EIA_API_KEY, "frequency": "hourly", "data[0]": "value",
+        "facets[respondent][]": region, "facets[type][]": "D",
+        "start": START_STR, "end": END_STR,
+        "sort[0][column]": "period", "sort[0][direction]": "asc",
+        "length": 5000, "offset": 0,
+    }
+    rows = _paginate(REGION_URL, params)
+    if not rows:
+        print(f"  ⚠  No demand data for {region}")
         return pd.DataFrame()
-
-    df = pd.DataFrame(all_rows)[["period", "value"]]
-    df.rename(columns={"period": "datetime_utc", "value": TYPE_LABELS[type_code]}, inplace=True)
+    df = pd.DataFrame(rows)[["period", "value"]]
+    df.rename(columns={"period": "datetime_utc", "value": "demand_mwh"}, inplace=True)
     df["datetime_utc"] = pd.to_datetime(df["datetime_utc"])
-    df[TYPE_LABELS[type_code]] = pd.to_numeric(df[TYPE_LABELS[type_code]], errors="coerce")
+    df["demand_mwh"] = pd.to_numeric(df["demand_mwh"], errors="coerce")
+    return df.set_index("datetime_utc")
+
+
+def fetch_fueltype(region: str, fueltype: str, col_name: str) -> pd.DataFrame:
+    """Fetch hourly solar or wind from /rto/fuel-type-data/."""
+    params = {
+        "api_key": EIA_API_KEY, "frequency": "hourly", "data[0]": "value",
+        "facets[respondent][]": region, "facets[fueltype][]": fueltype,
+        "start": START_STR, "end": END_STR,
+        "sort[0][column]": "period", "sort[0][direction]": "asc",
+        "length": 5000, "offset": 0,
+    }
+    rows = _paginate(FUELTYPE_URL, params)
+    if not rows:
+        print(f"  ⚠  No data for {region} / {fueltype}")
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)[["period", "value"]]
+    df.rename(columns={"period": "datetime_utc", "value": col_name}, inplace=True)
+    df["datetime_utc"] = pd.to_datetime(df["datetime_utc"])
+    df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
     return df.set_index("datetime_utc")
 
 
@@ -114,9 +120,15 @@ def main():
         print(f"\n📡 Pulling {region}...")
         series = {}
 
-        for type_code, col_name in TYPE_LABELS.items():
+        print(f"   → demand_mwh")
+        df = fetch_demand(region)
+        if not df.empty:
+            series["demand_mwh"] = df["demand_mwh"]
+        time.sleep(0.3)
+
+        for fueltype, col_name in FUELTYPE_LABELS.items():
             print(f"   → {col_name}")
-            df = fetch_series(region, type_code)
+            df = fetch_fueltype(region, fueltype, col_name)
             if not df.empty:
                 series[col_name] = df[col_name]
             time.sleep(0.3)
