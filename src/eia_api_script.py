@@ -20,7 +20,7 @@ EIA_API_KEY = os.getenv("EIA_API_KEY", "")  # set in .env file
 # Date range (ISO 8601, UTC). Adjust as needed.
 # EIA hourly data typically has a ~1-2 day lag.
 END_DATE   = datetime.now(timezone.utc) - timedelta(days=2)
-START_DATE = END_DATE - timedelta(days=90)       # 90 days ≈ 2,160 rows per region
+START_DATE = END_DATE - timedelta(days=365)      # 1 year ≈ 8,760 rows per region
 
 START_STR = START_DATE.strftime("%Y-%m-%dT%H")
 END_STR   = END_DATE.strftime("%Y-%m-%dT%H")

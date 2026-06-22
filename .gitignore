@@ -1,3 +1,7 @@
 CLAUDE.md
 .claude/
 .env
+notebooks/.cache.sqlite
+notebooks/.ipynb_checkpoints/
+.ipynb_checkpoints/
+.DS_Store

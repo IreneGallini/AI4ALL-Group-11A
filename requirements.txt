@@ -15,3 +15,8 @@ scikit-learn>=1.5
 
 # Notebooks
 jupyterlab>=4.2
+
+# Weather API
+openmeteo-requests
+requests-cache
+retry-requests
