@@ -12,6 +12,10 @@ from retry_requests import retry
 import pandas as pd
 import os
 
+# Create data folders if they don't exist
+os.makedirs("data/raw", exist_ok=True)
+os.makedirs("data/processed", exist_ok=True)
+
 # Setup connection to Open-Meteo
 cache_session = requests_cache.CachedSession('.cache', expire_after=-1)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)

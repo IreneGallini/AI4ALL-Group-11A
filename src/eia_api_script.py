@@ -164,7 +164,9 @@ def main():
     ]
     combined = combined[[c for c in col_order if c in combined.columns]]
     combined.sort_values(["region", "datetime_utc"], inplace=True)
-
+    
+    os.makedirs("data/raw", exist_ok=True)
+    
     combined.to_csv(OUTPUT_FILE, index=False)
     print(f"\n🎉 Saved {len(combined):,} rows × {len(combined.columns)} columns → {OUTPUT_FILE}")
     print("\nColumn summary:")
