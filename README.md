@@ -86,3 +86,6 @@ jupyter lab
 ```
 
 Open your notebook in `notebooks/`, click the kernel name in the top-right corner, and select **Python (ai4all-11a)**.
+
+## Issues
+-  1,280 missing weather values in the merged file — likely from the edge of the date range — so you may want to handle those before training.
