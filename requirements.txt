@@ -12,6 +12,7 @@ seaborn>=0.13
 
 # Supervised ML
 scikit-learn>=1.5
+xgboost>=2.0
 
 # Notebooks
 jupyterlab>=4.2
