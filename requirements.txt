@@ -1,23 +1,6 @@
-# Core data
-numpy>=1.26
-pandas>=2.2
-
-# API
-requests>=2.32
-python-dotenv>=1.0
-
-# Visualization
-matplotlib>=3.9
-seaborn>=0.13
-
-# Supervised ML
-scikit-learn>=1.5
-xgboost>=2.0
-
-# Notebooks
-jupyterlab>=4.2
-
-# Weather API
-openmeteo-requests
-requests-cache
-retry-requests
+streamlit
+pandas
+numpy
+scikit-learn
+joblib
+matplotlib
