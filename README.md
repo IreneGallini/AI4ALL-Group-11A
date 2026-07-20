@@ -15,27 +15,46 @@ As we move into data processing and modeling, reusable code should be moved into
 - Cleaner and more maintainable codebase 
 
 ```
-energy-forecasting/
+AI4ALL-Group-11A/
 │
-├── data/
+├── data/                      --> gitignored, regenerate locally (see below)
 │   ├── raw/
 │   └── processed/
 │
-├── notebooks/ --> for individual work
-│   ├── name1_eda.ipynb
-│   ├── name1_eda.ipynb etc
+├── notebooks/                 --> for individual work
+│   ├── diego_eda.ipynb
+│   ├── irene_eda.ipynb
+│   ├── leul_eda.ipynb
+│   └── sujjal_eda.ipynb
 │
 ├── src/
-│   ├── data_loading.py
-│   ├── preprocessing.py
-│   └── visualization.py
+│   ├── eia_api_script.py      --> pulls EIA demand/solar/wind data
+│   ├── weather_merge.py       --> pulls weather data, merges with EIA data
+│   ├── demand_lag_add.py      --> adds lagged-demand features
+│   ├── linear_regression_model.py
+│   └── xgboost_model.py
 │
-├── reports/
+├── models/                    --> trained models (tracked in git)
+├── reports/                   --> plots (tracked in git)
 │
 ├── requirements.txt
 ├── environment.yml
 └── README.md
 ```
+
+## Rebuilding the data and models
+
+Run in order from the repo root:
+
+```bash
+python src/eia_api_script.py       # -> data/raw/eia_energy_data.csv
+python src/weather_merge.py        # -> data/raw/weather_data.csv, data/processed/eia_with_weather.csv
+python src/demand_lag_add.py       # -> data/processed/eia_with_features.csv
+python src/linear_regression_model.py   # -> models/linear_regression_model.pkl
+python src/xgboost_model.py             # -> models/xgb_demand_model.json
+```
+
+See `CLAUDE.md` for details on each step's inputs/outputs.
 
 ---
 
