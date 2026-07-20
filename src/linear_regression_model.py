@@ -12,7 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 def main():    
     # Load data
-    data_path = BASE_DIR/"data"/"processed"/"eia_with_weather.csv"
+    data_path = BASE_DIR/"data"/"processed"/"eia_with_features.csv"
     df = pd.read_csv(data_path)
     
     # Convert time and sort
