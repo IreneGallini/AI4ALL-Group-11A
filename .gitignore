@@ -7,3 +7,4 @@ notebooks/.ipynb_checkpoints/
 .DS_Store
 data/
 Miniconda3-latest-MacOSX-arm64.sh
+venv
