@@ -24,8 +24,8 @@ import joblib
 from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-DATA_PATH = "eia_with_features.csv"
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_PATH = BASE_DIR/"data"/"processed"/"eia_with_features.csv"
 OUT_DIR = Path("out")
 OUT_DIR.mkdir(exist_ok=True)
 
