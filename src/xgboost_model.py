@@ -1,6 +1,22 @@
 """
-Trains an XGBoost regression model to forecast hourly electricity demand
-from calendar, weather, and lagged-demand features.
+Electricity demand forecasting with XGBoost — multi-horizon (1 day / 1 week / 1 month ahead)
+
+Same "direct" multi-horizon approach as train_demand_forecast.py's Random Forest: for each
+horizon h (in hours), a separate model predicts demand at time T using ONLY information that
+would actually be available at forecast time (T - h). Feature engineering is ported from that
+script so the two models are trained on the same inputs and are directly comparable — they
+differ only in algorithm (XGBoost keeps `region` as a native categorical column instead of
+one-hot encoding it).
+
+Feature groups per horizon h:
+  - Lagged demand / rolling stats, computed as of the forecast origin (T - h), shifted forward
+    by h so they line up with the target row.
+  - Calendar features of the TARGET time T (hour, day-of-week, month, weekend, US holiday,
+    cyclical encodings) — fully known in advance, no forecast needed.
+  - Weather at the TARGET time T (temperature, humidity, wind, precipitation). In this dataset
+    these are historical actuals; in production these must be replaced with a weather FORECAST
+    for T.
+  - Region, as a pandas categorical column (XGBoost handles it natively).
 
 Usage:
     python src/xgboost_model.py
@@ -9,6 +25,7 @@ Usage:
 import json
 from pathlib import Path
 
+import holidays
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -19,21 +36,21 @@ ROOT = Path(__file__).parent.parent
 INPUT_FILE = ROOT / "data" / "processed" / "eia_with_features.csv"
 MODEL_DIR = ROOT / "models"
 REPORTS_DIR = ROOT / "reports"
-MODEL_FILE = MODEL_DIR / "xgb_demand_model.json"
 METRICS_FILE = MODEL_DIR / "xgb_demand_metrics.json"
 
-TARGET = "demand_mwh"
-FEATURES = [
-    "hour", "day_of_week", "month", "is_weekend",
+HORIZONS = {24: "1_day", 168: "1_week", 720: "1_month"}
+TEST_DAYS = 45  # holdout: last 45 days of the dataset, by target timestamp (matches RF script)
+VAL_DAYS = 30   # earlier window carved out of training data, used for early stopping
+
+CALENDAR_FEATURES = [
+    "hour_sin", "hour_cos", "dow_sin", "dow_cos", "doy_sin", "doy_cos",
+    "is_weekend", "is_holiday", "month",
+]
+WEATHER_FEATURES = [
     "temperature_F", "apparent_temp_F", "humidity_pct",
     "precipitation_mm", "wind_speed_kmh",
-    "solar_gen_mwh", "wind_gen_mwh",
-    "demand_lag_1h", "demand_lag_24h",
-    "region",
 ]
 
-TEST_DAYS = 60  # most recent window held out to simulate forecasting the future
-VAL_DAYS = 30   # earlier window carved out of training data, used for early stopping
 PLOT_REGION = "ERCO"
 
 # dataviz reference palette: categorical slot 1 (blue) vs slot 8 (orange)
@@ -41,32 +58,66 @@ COLOR_ACTUAL = "#2a78d6"
 COLOR_PREDICTED = "#eb6834"
 COLOR_IMPORTANCE = "#2a78d6"
 
+us_holidays = holidays.US(years=[2025, 2026])
 
-def load_data() -> pd.DataFrame:
-    df = pd.read_csv(INPUT_FILE, parse_dates=["datetime_utc"])
-    df = df.sort_values(["region", "datetime_utc"]).reset_index(drop=True)
-    df["region"] = df["region"].astype("category")
 
-    before = len(df)
-    df = df.dropna(subset=FEATURES + [TARGET]).reset_index(drop=True)
-    print(f"Dropped {before - len(df)} rows with missing values ({before} -> {len(df)})")
+def add_calendar_features(df):
+    df = df.copy()
+    df["is_holiday"] = df["datetime_utc"].dt.date.isin(us_holidays).astype(int)
+    doy = df["datetime_utc"].dt.dayofyear
+    df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["dow_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
+    df["doy_sin"] = np.sin(2 * np.pi * doy / 365.25)
+    df["doy_cos"] = np.cos(2 * np.pi * doy / 365.25)
     return df
 
 
-def time_split(df: pd.DataFrame):
-    """Chronological train/val/test split so the model never trains on the future."""
-    max_date = df["datetime_utc"].max()
-    test_cutoff = max_date - pd.Timedelta(days=TEST_DAYS)
-    val_cutoff = test_cutoff - pd.Timedelta(days=VAL_DAYS)
+def load_and_clean(path):
+    df = pd.read_csv(path, parse_dates=["datetime_utc"])
+    df = df.sort_values(["region", "datetime_utc"]).reset_index(drop=True)
 
-    train = df[df["datetime_utc"] < val_cutoff]
-    val = df[(df["datetime_utc"] >= val_cutoff) & (df["datetime_utc"] < test_cutoff)]
-    test = df[df["datetime_utc"] >= test_cutoff]
+    cleaned = []
+    gen_cols = ["solar_gen_mwh", "wind_gen_mwh"]
+    for region, g in df.groupby("region", observed=True):
+        g = g.sort_values("datetime_utc").copy()
+        # interior gaps -> linear interpolation; trailing gap (end of series) -> forward fill
+        g[WEATHER_FEATURES] = g[WEATHER_FEATURES].interpolate(limit_direction="both")
+        g[gen_cols] = g[gen_cols].interpolate(limit_direction="both")
+        cleaned.append(g)
+    return pd.concat(cleaned, ignore_index=True)
 
-    print(f"Train: {train['datetime_utc'].min()} -> {train['datetime_utc'].max()} ({len(train)} rows)")
-    print(f"Val:   {val['datetime_utc'].min()} -> {val['datetime_utc'].max()} ({len(val)} rows)")
-    print(f"Test:  {test['datetime_utc'].min()} -> {test['datetime_utc'].max()} ({len(test)} rows)")
-    return train, val, test
+
+def build_horizon_dataset(df, h):
+    """Build feature/target rows for a single forecast horizon h (hours)."""
+    rows = []
+    for region, g in df.groupby("region", observed=True):
+        g = g.sort_values("datetime_utc").reset_index(drop=True)
+        demand = g["demand_mwh"]
+
+        feat = pd.DataFrame(index=g.index)
+        # information available at the forecast origin (T - h), shifted to align with target row T
+        feat["origin_demand"] = demand.shift(h)
+        feat["origin_demand_lag24"] = demand.shift(h + 24)
+        feat["origin_demand_lag168"] = demand.shift(h + 168)
+        feat["origin_roll24_mean"] = demand.shift(h).rolling(24).mean()
+        feat["origin_roll24_std"] = demand.shift(h).rolling(24).std()
+        feat["origin_roll168_mean"] = demand.shift(h).rolling(168).mean()
+
+        # target-time info, fully known in advance
+        for c in CALENDAR_FEATURES + WEATHER_FEATURES:
+            feat[c] = g[c]
+
+        feat["region"] = region
+        feat["target"] = demand
+        feat["target_datetime"] = g["datetime_utc"]
+        rows.append(feat)
+
+    out = pd.concat(rows, ignore_index=True)
+    out = out.dropna().reset_index(drop=True)
+    out["region"] = out["region"].astype("category")
+    return out
 
 
 def evaluate(y_true, y_pred, label):
@@ -78,13 +129,13 @@ def evaluate(y_true, y_pred, label):
     return {"mae": float(mae), "rmse": float(rmse), "mape": mape, "r2": float(r2)}
 
 
-def plot_feature_importance(model, features, out_path):
+def plot_feature_importance(model, features, label, out_path):
     importances = model.feature_importances_
     order = np.argsort(importances)
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.barh(np.array(features)[order], importances[order], color=COLOR_IMPORTANCE)
     ax.set_xlabel("Importance (gain)")
-    ax.set_title("XGBoost Feature Importance — Demand Forecast")
+    ax.set_title(f"XGBoost Feature Importance — Demand Forecast ({label})")
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
@@ -92,15 +143,13 @@ def plot_feature_importance(model, features, out_path):
     print(f"Saved {out_path}")
 
 
-def plot_actual_vs_predicted(test, y_pred, region, out_path):
-    mask = (test["region"].astype(str) == region).to_numpy()
-    subset = test.loc[mask].copy()
-    subset["predicted"] = y_pred[mask]
+def plot_actual_vs_predicted(test_out, region, label, out_path):
+    subset = test_out[test_out["region"].astype(str) == region]
 
     fig, ax = plt.subplots(figsize=(11, 4.5))
-    ax.plot(subset["datetime_utc"], subset[TARGET], label="Actual", color=COLOR_ACTUAL, linewidth=2)
-    ax.plot(subset["datetime_utc"], subset["predicted"], label="Predicted", color=COLOR_PREDICTED, linewidth=2)
-    ax.set_title(f"Actual vs Predicted Demand — {region} (test period)")
+    ax.plot(subset["target_datetime"], subset["target"], label="Actual", color=COLOR_ACTUAL, linewidth=2)
+    ax.plot(subset["target_datetime"], subset["predicted"], label="Predicted", color=COLOR_PREDICTED, linewidth=2)
+    ax.set_title(f"Actual vs Predicted Demand — {region} ({label} horizon, test period)")
     ax.set_ylabel("Demand (MWh)")
     ax.spines[["top", "right"]].set_visible(False)
     ax.legend(frameon=False)
@@ -110,13 +159,23 @@ def plot_actual_vs_predicted(test, y_pred, region, out_path):
     print(f"Saved {out_path}")
 
 
-def main():
-    df = load_data()
-    train, val, test = time_split(df)
+def train_and_eval(df, h, label):
+    print(f"\n=== Horizon: {label} ({h}h) ===")
+    data = build_horizon_dataset(df, h)
+    feature_cols = [c for c in data.columns if c not in ("target", "target_datetime")]
 
-    X_train, y_train = train[FEATURES], train[TARGET]
-    X_val, y_val = val[FEATURES], val[TARGET]
-    X_test, y_test = test[FEATURES], test[TARGET]
+    test_cutoff = data["target_datetime"].max() - pd.Timedelta(days=TEST_DAYS)
+    val_cutoff = test_cutoff - pd.Timedelta(days=VAL_DAYS)
+
+    train_mask = data["target_datetime"] < val_cutoff
+    val_mask = (data["target_datetime"] >= val_cutoff) & (data["target_datetime"] < test_cutoff)
+    test_mask = data["target_datetime"] >= test_cutoff
+
+    X_train, y_train = data.loc[train_mask, feature_cols], data.loc[train_mask, "target"]
+    X_val, y_val = data.loc[val_mask, feature_cols], data.loc[val_mask, "target"]
+    X_test, y_test = data.loc[test_mask, feature_cols], data.loc[test_mask, "target"]
+
+    print(f"Train: {len(X_train)} rows  Val: {len(X_val)} rows  Test: {len(X_test)} rows")
 
     model = XGBRegressor(
         n_estimators=1000,
@@ -134,18 +193,18 @@ def main():
         n_jobs=-1,
     )
 
-    print("\nTraining XGBoost model...")
+    print("Training XGBoost model...")
     model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
     print(f"Best iteration: {model.best_iteration} (of {model.n_estimators} max)")
 
     y_pred = model.predict(X_test)
 
-    print("\nTest set performance:")
+    print("Test set performance:")
     overall = evaluate(y_test.to_numpy(), y_pred, "Overall")
 
-    print("\nPer-region test performance:")
+    print("Per-region test performance:")
     per_region = {}
-    region_str = test["region"].astype(str).to_numpy()
+    region_str = data.loc[test_mask, "region"].astype(str).to_numpy()
     y_test_arr = y_test.to_numpy()
     for region in sorted(set(region_str)):
         mask = region_str == region
@@ -154,15 +213,30 @@ def main():
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    model.save_model(str(MODEL_FILE))
-    print(f"\nSaved model to {MODEL_FILE}")
+    model_file = MODEL_DIR / f"xgb_model_{label}.json"
+    model.save_model(str(model_file))
+    print(f"Saved model to {model_file}")
+
+    test_out = data.loc[test_mask, ["target_datetime", "target", "region"]].copy()
+    test_out["predicted"] = y_pred
+
+    plot_feature_importance(model, feature_cols, label, REPORTS_DIR / f"xgb_feature_importance_{label}.png")
+    plot_actual_vs_predicted(test_out, PLOT_REGION, label, REPORTS_DIR / f"xgb_actual_vs_predicted_{label}.png")
+
+    return {"overall": overall, "per_region": per_region}
+
+
+def main():
+    df = load_and_clean(INPUT_FILE)
+    df = add_calendar_features(df)
+
+    metrics = {}
+    for h, label in HORIZONS.items():
+        metrics[label] = train_and_eval(df, h, label)
 
     with open(METRICS_FILE, "w") as f:
-        json.dump({"overall": overall, "per_region": per_region}, f, indent=2)
-    print(f"Saved metrics to {METRICS_FILE}")
-
-    plot_feature_importance(model, FEATURES, REPORTS_DIR / "xgb_feature_importance.png")
-    plot_actual_vs_predicted(test, y_pred, PLOT_REGION, REPORTS_DIR / "xgb_actual_vs_predicted.png")
+        json.dump(metrics, f, indent=2)
+    print(f"\nSaved metrics to {METRICS_FILE}")
 
 
 if __name__ == "__main__":
