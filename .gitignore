@@ -5,6 +5,8 @@ notebooks/.cache.sqlite
 notebooks/.ipynb_checkpoints/
 .ipynb_checkpoints/
 .DS_Store
-data/
+data/raw/
+data/processed/*
+!data/processed/eia_with_features.csv
 Miniconda3-latest-MacOSX-arm64.sh
 venv
