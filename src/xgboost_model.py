@@ -150,6 +150,7 @@ def train_and_eval(df, h, label):
 
     test_out = data.loc[test_mask, ["target_datetime", "target", "region"]].copy()
     test_out["predicted"] = y_pred
+    test_out.to_csv(REPORTS_DIR / f"xgb_test_predictions_{label}.csv", index=False)
 
     plot_feature_importance(model, feature_cols, label, REPORTS_DIR / f"xgb_feature_importance_{label}.png")
     plot_actual_vs_predicted(test_out, PLOT_REGION, label, REPORTS_DIR / f"xgb_actual_vs_predicted_{label}.png")
