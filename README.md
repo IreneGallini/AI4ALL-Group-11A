@@ -33,6 +33,7 @@ AI4ALL-Group-11A/
 │   ├── eia_api_script.py      --> pulls EIA demand/solar/wind data
 │   ├── weather_merge.py       --> pulls weather data, merges with EIA data
 │   ├── demand_lag_add.py      --> adds lagged-demand features
+│   ├── features.py            --> shared feature engineering, used by both models below (and app.py)
 │   ├── linear_regression_model.py
 │   ├── xgboost_model.py       --> multi-horizon XGBoost (1 day / 1 week / 1 month)
 │   └── train_demand_forecast.py  --> multi-horizon Random Forest (1 day / 1 week / 1 month)
@@ -40,6 +41,7 @@ AI4ALL-Group-11A/
 ├── models/                    --> trained models (tracked in git)
 ├── reports/                   --> plots (tracked in git)
 │
+├── app.py                     --> Streamlit dashboard (deployed via Streamlit Community Cloud)
 ├── requirements.txt
 ├── environment.yml
 └── README.md
@@ -110,6 +112,15 @@ jupyter lab
 
 Open your notebook in `notebooks/`, click the kernel name in the top-right corner, and select **Python (ai4all-11a)**.
 
+## Running the app locally
+
+```bash
+streamlit run app.py
+```
+
+`app.py` is currently a minimal stub — see the TODO docstring at the top of that file for what's
+still left to build.
+
 ## Deployment
 
 Target: **Streamlit Community Cloud**, deploying straight from this GitHub repo. It installs
@@ -121,5 +132,6 @@ needed: `models/` and `data/processed/eia_with_features.csv` are both committed,
 clone has everything required to serve predictions without rerunning the pipeline.
 `EIA_API_KEY` only becomes relevant once a live-refresh feature is built.
 
-## Issues
--  1,280 missing weather values in the merged file — likely from the edge of the date range — so you may want to handle those before training.
+## Known limitations
+- `app.py` is currently a minimal stub (metrics comparison only) — see the TODO docstring at the top of that file for the full planned scope.
+- Models are trained on a static baseline snapshot (`data/processed/eia_with_features.csv`); there's no live data refresh yet.
