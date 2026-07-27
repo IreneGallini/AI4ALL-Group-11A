@@ -1,32 +1,23 @@
 """
 Streamlit app for the AI4ALL Group 11A electricity demand forecasts.
 
-Currently a minimal stub — just enough to deploy to Streamlit Community Cloud
-and prove the committed model/report artifacts load correctly. Full scope is
-still TODO; pick a piece below when you're ready to build it out.
-
 TODO — full app scope:
   - Model selector: Random Forest vs XGBoost
       models/rf_model_{1_day,1_week,1_month}.joblib
       models/xgb_model_{1_day,1_week,1_month}.json
   - Horizon selector: 1 day / 1 week / 1 month
   - Region selector: BPAT, CISO, ERCO, ISNE, MISO, NYIS, PJM, SWPP
-  - Actual-vs-predicted chart for the test period.
+  - Actual vs predicted chart for the test period.
       MVP path: reuse the precomputed reports/rf_test_predictions_{horizon}.csv.
       XGBoost doesn't save an equivalent predictions CSV yet (only PNG plots
       in reports/xgb_actual_vs_predicted_*.png) — add one in xgboost_model.py
       (mirror train_demand_forecast.py's test_out.to_csv(...)) if you want
       the XGB side of this chart to be interactive too.
-  - Per-region metrics table (MAE/RMSE/MAPE/R2) from
+  - Per region metrics table (MAE/RMSE/MAPE/R2) from
       models/rf_demand_metrics.json / models/xgb_demand_metrics.json
       (both already have "per_region" breakdowns, not just "overall").
   - Feature importance view from reports/rf_feature_importance_*.csv and
       reports/xgb_feature_importance_*.png.
-  - Live inference (stretch goal, not needed for the static-baseline MVP):
-      reuse src/features.py (add_calendar_features, build_horizon_dataset) to
-      rebuild origin-lag features for a user-chosen region/time straight from
-      the committed data/processed/eia_with_features.csv — no external API
-      call needed since there's no live data refresh yet.
 """
 
 import json
@@ -44,7 +35,7 @@ st.title("Electricity Demand Forecasting")
 st.markdown(
     "Forecasts hourly electricity demand for 8 major US grid regions "
     "(EIA data), comparing a Random Forest and an XGBoost model across "
-    "1-day, 1-week, and 1-month horizons."
+    "1 day, 1 week, and 1 month horizons."
 )
 
 
@@ -59,7 +50,7 @@ def load_metrics():
 
 rf_metrics, xgb_metrics = load_metrics()
 
-st.header("Model comparison — overall test-set performance")
+st.header("Model comparison — overall test set performance")
 rows = []
 for horizon in rf_metrics:
     rf_overall = rf_metrics[horizon]["overall"]
