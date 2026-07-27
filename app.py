@@ -50,24 +50,3 @@ def load_metrics():
 
 rf_metrics, xgb_metrics = load_metrics()
 
-# st.header("Model comparison ")
-# rows = []
-# for horizon in rf_metrics:
-#     rf_overall = rf_metrics[horizon]["overall"]
-#     xgb_overall = xgb_metrics[horizon]["overall"]
-#     rows.append(
-#         {
-#             "horizon": horizon,
-#             "rf_mae": rf_overall["mae"],
-#             "rf_rmse": rf_overall["rmse"],
-#             "rf_mape": rf_overall["mape"],
-#             "rf_r2": rf_overall["r2"],
-#             "xgb_mae": xgb_overall["mae"],
-#             "xgb_rmse": xgb_overall["rmse"],
-#             "xgb_mape": xgb_overall["mape"],
-#             "xgb_r2": xgb_overall["r2"],
-#         }
-#     )
-
-# comparison = pd.DataFrame(rows).set_index("horizon")
-# st.dataframe(comparison, use_container_width=True)
