@@ -17,9 +17,11 @@ As we move into data processing and modeling, reusable code should be moved into
 ```
 AI4ALL-Group-11A/
 │
-├── data/                      --> gitignored, regenerate locally (see below)
-│   ├── raw/
-│   └── processed/
+├── data/                      --> mostly gitignored, regenerate locally (see below)
+│   ├── raw/                   --> gitignored
+│   └── processed/             --> gitignored, except eia_with_features.csv (committed as a
+│                                   static baseline snapshot so deployment doesn't need to
+│                                   rerun the pipeline)
 │
 ├── notebooks/                 --> for individual work
 │   ├── diego_eda.ipynb
@@ -32,7 +34,8 @@ AI4ALL-Group-11A/
 │   ├── weather_merge.py       --> pulls weather data, merges with EIA data
 │   ├── demand_lag_add.py      --> adds lagged-demand features
 │   ├── linear_regression_model.py
-│   └── xgboost_model.py
+│   ├── xgboost_model.py       --> multi-horizon XGBoost (1 day / 1 week / 1 month)
+│   └── train_demand_forecast.py  --> multi-horizon Random Forest (1 day / 1 week / 1 month)
 │
 ├── models/                    --> trained models (tracked in git)
 ├── reports/                   --> plots (tracked in git)
@@ -51,7 +54,8 @@ python src/eia_api_script.py       # -> data/raw/eia_energy_data.csv
 python src/weather_merge.py        # -> data/raw/weather_data.csv, data/processed/eia_with_weather.csv
 python src/demand_lag_add.py       # -> data/processed/eia_with_features.csv
 python src/linear_regression_model.py   # -> models/linear_regression_model.pkl
-python src/xgboost_model.py             # -> models/xgb_demand_model.json
+python src/xgboost_model.py             # -> models/xgb_model_{1_day,1_week,1_month}.json, models/xgb_demand_metrics.json
+python src/train_demand_forecast.py     # -> models/rf_model_{1_day,1_week,1_month}.joblib, models/rf_demand_metrics.json
 ```
 
 See `CLAUDE.md` for details on each step's inputs/outputs.
@@ -105,6 +109,17 @@ jupyter lab
 ```
 
 Open your notebook in `notebooks/`, click the kernel name in the top-right corner, and select **Python (ai4all-11a)**.
+
+## Deployment
+
+Target: **Streamlit Community Cloud**, deploying straight from this GitHub repo. It installs
+dependencies from `requirements.txt` (not `environment.yml`), so keep that file's pins in sync
+with whatever the committed models were trained under.
+
+For the static-baseline dashboard (current scope — no live data refresh yet), no secrets are
+needed: `models/` and `data/processed/eia_with_features.csv` are both committed, so a fresh
+clone has everything required to serve predictions without rerunning the pipeline.
+`EIA_API_KEY` only becomes relevant once a live-refresh feature is built.
 
 ## Issues
 -  1,280 missing weather values in the merged file — likely from the edge of the date range — so you may want to handle those before training.

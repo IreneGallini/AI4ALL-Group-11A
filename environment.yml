@@ -10,7 +10,7 @@ dependencies:
   - python-dotenv>=1.0
   - matplotlib>=3.9
   - seaborn>=0.13
-  - scikit-learn>=1.5
+  - scikit-learn==1.9.0
   - xgboost>=2.0
   - jupyterlab>=4.2
   - pip
