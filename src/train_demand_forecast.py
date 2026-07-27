@@ -17,6 +17,7 @@ Feature groups per horizon h:
   - Region, one-hot encoded (single pooled model covers all 8 regions).
 """
 
+import json
 import pandas as pd
 import numpy as np
 import holidays
@@ -24,10 +25,14 @@ import joblib
 from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_PATH = BASE_DIR/"data"/"processed"/"eia_with_features.csv"
-OUT_DIR = Path("out")
-OUT_DIR.mkdir(exist_ok=True)
+MODEL_DIR = BASE_DIR/"models"
+REPORTS_DIR = BASE_DIR/"reports"
+METRICS_FILE = MODEL_DIR/"rf_demand_metrics.json"
+MODEL_DIR.mkdir(exist_ok=True)
+REPORTS_DIR.mkdir(exist_ok=True)
 
 HORIZONS = {24: "1_day", 168: "1_week", 720: "1_month"}
 TEST_DAYS = 45  # holdout: last 45 days of the dataset, by target timestamp
@@ -98,6 +103,15 @@ def build_horizon_dataset(df, h):
     return out
 
 
+def evaluate(y_true, y_pred, label):
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = mean_squared_error(y_true, y_pred) ** 0.5
+    mape = float(np.mean(np.abs((y_true - y_pred) / y_true))) * 100
+    r2 = r2_score(y_true, y_pred)
+    print(f"{label:>12}  MAE={mae:8.1f} MWh  RMSE={rmse:8.1f} MWh  MAPE={mape:5.2f}%  R2={r2:.4f}")
+    return {"mae": float(mae), "rmse": float(rmse), "mape": mape, "r2": float(r2)}
+
+
 def train_and_eval(df, h, label):
     print(f"\n=== Horizon: {label} ({h}h) ===")
     data = build_horizon_dataset(df, h)
@@ -121,36 +135,47 @@ def train_and_eval(df, h, label):
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
 
-    mae = mean_absolute_error(y_test, preds)
-    rmse = mean_squared_error(y_test, preds) ** 0.5
-    mape = float(np.mean(np.abs((y_test - preds) / y_test)) * 100)
-    r2 = r2_score(y_test, preds)
-    print(f"MAE={mae:.1f} MWh  RMSE={rmse:.1f} MWh  MAPE={mape:.2f}%  R2={r2:.3f}")
+    print("Test set performance:")
+    overall = evaluate(y_test.to_numpy(), preds, "Overall")
 
-    joblib.dump({"model": model, "feature_cols": feature_cols}, OUT_DIR / f"rf_model_{label}.joblib")
+    print("Per-region test performance:")
+    per_region = {}
+    region_str = region_col.loc[test_mask].astype(str).to_numpy()
+    y_test_arr = y_test.to_numpy()
+    for region in sorted(set(region_str)):
+        mask = region_str == region
+        per_region[region] = evaluate(y_test_arr[mask], preds[mask], region)
+
+    joblib.dump({"model": model, "feature_cols": feature_cols}, MODEL_DIR / f"rf_model_{label}.joblib")
+    print(f"Saved model to {MODEL_DIR / f'rf_model_{label}.joblib'}")
 
     importances = pd.Series(model.feature_importances_, index=feature_cols).sort_values(ascending=False)
-    importances.to_csv(OUT_DIR / f"feature_importance_{label}.csv")
+    importances.to_csv(REPORTS_DIR / f"rf_feature_importance_{label}.csv")
 
     test_out = data.loc[test_mask, ["target_datetime", "target"]].copy()
     test_out["prediction"] = preds
     test_out["region"] = region_col.loc[test_mask].values
-    test_out.to_csv(OUT_DIR / f"test_predictions_{label}.csv", index=False)
+    test_out.to_csv(REPORTS_DIR / f"rf_test_predictions_{label}.csv", index=False)
 
-    return {"horizon": label, "hours": h, "mae": mae, "rmse": rmse, "mape": mape, "r2": r2,
-            "n_train": len(X_train), "n_test": len(X_test)}
+    return {"overall": overall, "per_region": per_region}
 
 
 def main():
     df = load_and_clean(DATA_PATH)
     df = add_calendar_features(df)
 
-    results = []
+    metrics = {}
     for h, label in HORIZONS.items():
-        results.append(train_and_eval(df, h, label))
+        metrics[label] = train_and_eval(df, h, label)
 
-    summary = pd.DataFrame(results)
-    summary.to_csv(OUT_DIR / "metrics_summary.csv", index=False)
+    with open(METRICS_FILE, "w") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"\nSaved metrics to {METRICS_FILE}")
+
+    summary = pd.DataFrame([
+        {"horizon": label, **m["overall"]} for label, m in metrics.items()
+    ])
+    summary.to_csv(REPORTS_DIR / "rf_metrics_summary.csv", index=False)
     print("\n=== Summary ===")
     print(summary)
 
