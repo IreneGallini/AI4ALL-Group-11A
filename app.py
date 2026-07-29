@@ -50,3 +50,33 @@ def load_metrics():
 
 rf_metrics, xgb_metrics = load_metrics()
 
+model = st.selectbox(
+    "Model",
+    ["Random Forest", "XGBoost"]
+)
+
+horizon = st.selectbox(
+    "Forecast Horizon",
+    ["1 Day", "1 Week", "1 Month"]
+)
+
+regions = [
+    "BPAT",
+    "CISO",
+    "ERCO",
+    "ISNE",
+    "MISO",
+    "NYIS",
+    "PJM",
+    "SWPP",
+]
+
+region = st.selectbox(
+    "Region",
+    regions
+)
+
+if model == "Random Forest":
+    metrics = rf_metrics
+else:
+    metrics = xgb_metrics
