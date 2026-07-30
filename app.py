@@ -1,64 +1,84 @@
 """
-Streamlit app for the AI4ALL Group 11A electricity demand forecasts.
+Streamlit dashboard for AI4ALL Group 11A electricity demand forecasting.
 
-TODO — full app scope:
-  - Model selector: Random Forest vs XGBoost
-      models/rf_model_{1_day,1_week,1_month}.joblib
-      models/xgb_model_{1_day,1_week,1_month}.json
-  - Horizon selector: 1 day / 1 week / 1 month
-  - Region selector: BPAT, CISO, ERCO, ISNE, MISO, NYIS, PJM, SWPP
-  - Actual vs predicted chart for the test period.
-      MVP path: reuse the precomputed reports/rf_test_predictions_{horizon}.csv.
-      XGBoost doesn't save an equivalent predictions CSV yet (only PNG plots
-      in reports/xgb_actual_vs_predicted_*.png) — add one in xgboost_model.py
-      (mirror train_demand_forecast.py's test_out.to_csv(...)) if you want
-      the XGB side of this chart to be interactive too.
-  - Per region metrics table (MAE/RMSE/MAPE/R2) from
-      models/rf_demand_metrics.json / models/xgb_demand_metrics.json
-      (both already have "per_region" breakdowns, not just "overall").
-  - Feature importance view from reports/rf_feature_importance_*.csv and
-      reports/xgb_feature_importance_*.png.
+Users can:
+- Select a model (Random Forest or XGBoost)
+- Select a region
+- Enter date, time, and apparent temperature
+- Get a predicted electricity demand value
+
+The deployment models use:
+- region
+- hour
+- day_of_week
+- month
+- is_weekend
+- apparent_temp_F
 """
 
 import json
 from pathlib import Path
+from datetime import datetime
 
+import joblib
 import pandas as pd
 import streamlit as st
+import xgboost as xgb
+
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "models"
 
-st.set_page_config(page_title="AI4ALL Group 11A — Demand Forecast", layout="wide")
 
-st.title("Electricity Demand Forecasting")
-st.markdown(
-    "Forecasts hourly electricity demand for 8 major US grid regions "
-    "(EIA data), comparing a Random Forest and an XGBoost model across "
-    "1 day, 1 week, and 1 month horizons."
+st.set_page_config(
+    page_title="Electricity Demand Forecast",
+    layout="wide"
 )
 
 
-@st.cache_data
-def load_metrics():
-    with open(MODEL_DIR / "rf_demand_metrics.json") as f:
-        rf_metrics = json.load(f)
-    with open(MODEL_DIR / "xgb_demand_metrics.json") as f:
-        xgb_metrics = json.load(f)
-    return rf_metrics, xgb_metrics
+st.title("Electricity Demand Forecasting")
+
+st.markdown(
+    """
+    Predict hourly electricity demand for major US grid regions
+    using Random Forest and XGBoost models.
+    """
+)
 
 
-rf_metrics, xgb_metrics = load_metrics()
+# Load models
+@st.cache_resource
+def load_rf_model():
+    data = joblib.load(
+        MODEL_DIR / "deployment_rf_model.joblib"
+    )
 
-model = st.selectbox(
-    "Model",
+    return data["model"], data["features"]
+
+
+@st.cache_resource
+def load_xgb_model():
+    model = xgb.XGBRegressor()
+
+    model.load_model(
+        MODEL_DIR / "deployment_xgb_model.json"
+    )
+
+    with open(MODEL_DIR / "deployment_features.json") as f:
+        features = json.load(f)["features"]
+
+    return model, features
+
+
+# User Inputs
+st.header("Forecast Settings")
+
+
+model_choice = st.selectbox(
+    "Choose Model",
     ["Random Forest", "XGBoost"]
 )
 
-horizon = st.selectbox(
-    "Forecast Horizon",
-    ["1 Day", "1 Week", "1 Month"]
-)
 
 regions = [
     "BPAT",
@@ -71,12 +91,115 @@ regions = [
     "SWPP",
 ]
 
+
 region = st.selectbox(
-    "Region",
+    "Choose Region",
     regions
 )
 
-if model == "Random Forest":
-    metrics = rf_metrics
-else:
-    metrics = xgb_metrics
+
+prediction_date = st.date_input(
+    "Prediction Date"
+)
+
+
+prediction_time = st.time_input(
+    "Prediction Time"
+)
+
+
+temperature = st.number_input(
+    "Apparent Temperature (°F)",
+    value=70.0
+)
+
+
+
+# Prediction
+if st.button("Predict Demand"):
+
+    dt = datetime.combine(
+        prediction_date,
+        prediction_time
+    )
+
+
+    hour = dt.hour
+    day_of_week = dt.weekday()
+    month = dt.month
+    is_weekend = int(day_of_week >= 5)
+
+
+    user_input = {
+        "hour": hour,
+        "day_of_week": day_of_week,
+        "month": month,
+        "is_weekend": is_weekend,
+        "apparent_temp_F": temperature,
+    }
+
+
+    # Add region one-hot encoding
+    for r in regions:
+        user_input[f"region_{r}"] = (
+            1 if r == region else 0
+        )
+
+
+    input_df = pd.DataFrame([user_input])
+
+
+    if model_choice == "Random Forest":
+
+        model, features = load_rf_model()
+
+    else:
+
+        model, features = load_xgb_model()
+
+
+    # Ensure same feature order as training
+    for feature in features:
+        if feature not in input_df.columns:
+            input_df[feature] = 0
+
+
+    input_df = input_df[features]
+
+
+    prediction = model.predict(input_df)[0]
+
+
+    st.success(
+        f"Predicted Electricity Demand: {prediction:,.2f} MWh"
+    )
+
+
+    st.subheader("Input Summary")
+
+    summary = pd.DataFrame(
+        {
+            "Feature": [
+                "Region",
+                "Date",
+                "Time",
+                "Hour",
+                "Day of Week",
+                "Month",
+                "Weekend",
+                "Apparent Temperature"
+            ],
+            "Value": [
+                region,
+                prediction_date,
+                prediction_time,
+                hour,
+                day_of_week,
+                month,
+                "Yes" if is_weekend else "No",
+                f"{temperature} °F"
+            ]
+        }
+    )
+
+    st.table(summary)

@@ -1,0 +1,17 @@
+{
+  "features": [
+    "hour",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "apparent_temp_F",
+    "region_BPAT",
+    "region_CISO",
+    "region_ERCO",
+    "region_ISNE",
+    "region_MISO",
+    "region_NYIS",
+    "region_PJM",
+    "region_SWPP"
+  ]
+}
