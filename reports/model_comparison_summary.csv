@@ -1,0 +1,7 @@
+Model,Horizon,MAE (MWh),MAPE,R²
+XGBoost,1 day,1658,4.30%,0.9929
+Random Forest,1 day,1799,4.62%,0.9915
+XGBoost,1 week,2776,6.90%,0.9809
+Random Forest,1 week,2886,6.98%,0.9783
+XGBoost,1 month,3397,7.48%,0.9663
+Random Forest,1 month,3343,7.99%,0.9686
