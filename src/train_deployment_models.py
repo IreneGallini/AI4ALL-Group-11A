@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 DATA_PATH = BASE_DIR / "data" / "processed" / "eia_with_features.csv"
 MODEL_DIR = BASE_DIR / "models"
-
+DEPLOYMENT_METRICS_FILE = MODEL_DIR / "deployment_metrics.json"
 
 FEATURES = [
     "region",
@@ -36,6 +36,12 @@ def evaluate(y_true, y_pred, name):
     print(f"MAE: {mae:.2f} MWh")
     print(f"RMSE: {rmse:.2f} MWh")
     print(f"R2: {r2:.4f}")
+
+    return {
+        "mae": float(mae),
+        "rmse": float(rmse),
+        "r2": float(r2),
+    }
 
 
 def main():
@@ -64,11 +70,9 @@ def main():
         "apparent_temp_F",
     ] + region_columns
 
-
     df = df.dropna(
         subset=features + [TARGET]
     )
-
 
     # Last 20% is future test data
     split = int(len(df) * 0.8)
@@ -76,17 +80,14 @@ def main():
     train = df.iloc[:split]
     test = df.iloc[split:]
 
-
     X_train = train[features]
     y_train = train[TARGET]
 
     X_test = test[features]
     y_test = test[TARGET]
 
-
     print("Training rows:", len(train))
     print("Testing rows:", len(test))
-
 
     # Random Forest
     rf = RandomForestRegressor(
@@ -100,12 +101,11 @@ def main():
 
     rf_pred = rf.predict(X_test)
 
-    evaluate(
+    rf_metrics = evaluate(
         y_test,
         rf_pred,
         "Random Forest"
     )
-
 
     joblib.dump(
         {
@@ -114,7 +114,6 @@ def main():
         },
         MODEL_DIR / "deployment_rf_model.joblib"
     )
-
 
     # XGBoost
     xgb_model = xgb.XGBRegressor(
@@ -131,17 +130,15 @@ def main():
 
     xgb_pred = xgb_model.predict(X_test)
 
-    evaluate(
+    xgb_metrics = evaluate(
         y_test,
         xgb_pred,
         "XGBoost"
     )
 
-
     xgb_model.save_model(
         MODEL_DIR / "deployment_xgb_model.json"
     )
-
 
     with open(MODEL_DIR / "deployment_features.json", "w") as f:
         json.dump(
@@ -152,6 +149,15 @@ def main():
             indent=2
         )
 
+    deployment_metrics = {
+        "Random Forest": rf_metrics,
+        "XGBoost": xgb_metrics,
+    }
+
+    with open(DEPLOYMENT_METRICS_FILE, "w") as f:
+        json.dump(deployment_metrics, f, indent=2)
+
+    print(f"Saved metrics to {DEPLOYMENT_METRICS_FILE}")
 
     print("\nDeployment models saved!")
 
