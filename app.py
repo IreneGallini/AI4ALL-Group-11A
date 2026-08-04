@@ -56,6 +56,25 @@ REGION_COORDS = {
     "SWPP": ("Oklahoma City", 35.4676,  -97.5164),
 }
 
+# Human-readable names for each region code, per the README/CLAUDE.md
+# region descriptions — acronyms alone aren't meaningful to most users
+REGION_NAMES = {
+    "BPAT": "Pacific Northwest",
+    "CISO": "California",
+    "ERCO": "Texas",
+    "ISNE": "New England",
+    "MISO": "Midwest",
+    "NYIS": "New York",
+    "PJM": "Mid-Atlantic",
+    "SWPP": "Southwest Power Pool",
+}
+
+
+def region_label(code):
+    city = REGION_COORDS[code][0]
+    return f"{REGION_NAMES[code]} ({code} — {city})"
+
+
 MAP_KEY = "region_map"
 
 LOW_COLOR = (33, 102, 172)   # blue = lower demand
@@ -215,7 +234,8 @@ if map_selection:
 region = st.selectbox(
     "Choose Region",
     regions,
-    key="region"
+    key="region",
+    format_func=region_label
 )
 
 
@@ -319,7 +339,7 @@ if st.button("See Typical Demand Scenario"):
                 "Apparent Temperature"
             ],
             "Value": [
-                region,
+                region_label(region),
                 month_name,
                 day_type,
                 prediction_time,
@@ -377,6 +397,7 @@ for r in regions:
     city, lat, lon = REGION_COORDS[r]
     map_predictions.append({
         "region": r,
+        "region_name": REGION_NAMES[r],
         "city": city,
         "lat": lat,
         "lon": lon,
@@ -394,16 +415,32 @@ region_layer = pdk.Layer(
     data=map_df,
     get_position=["lon", "lat"],
     get_fill_color="color",
-    get_radius=40000,
+    get_radius=45000,
+    get_line_color=[255, 255, 255],
+    line_width_min_pixels=2,
+    stroked=True,
     pickable=True,
     auto_highlight=True,
 )
 
+label_layer = pdk.Layer(
+    "TextLayer",
+    data=map_df,
+    get_position=["lon", "lat"],
+    get_text="region_name",
+    get_size=14,
+    get_color=[20, 20, 20],
+    get_pixel_offset=[0, -22],
+    get_text_anchor="'middle'",
+    pickable=False,
+)
+
 deck = pdk.Deck(
-    layers=[region_layer],
+    layers=[region_layer, label_layer],
     initial_view_state=pdk.ViewState(latitude=39, longitude=-98, zoom=3),
-    tooltip={"html": "<b>{region}</b> ({city})<br/>~{predicted_demand} MWh"},
-    map_provider=None,
+    tooltip={"html": "<b>{region_name}</b> ({region} — {city})<br/>~{predicted_demand} MWh"},
+    map_provider="carto",
+    map_style="light",
 )
 
 st.pydeck_chart(
