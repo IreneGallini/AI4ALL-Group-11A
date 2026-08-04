@@ -72,7 +72,7 @@ REGION_NAMES = {
 
 def region_label(code):
     city = REGION_COORDS[code][0]
-    return f"{REGION_NAMES[code]} ({code} — {city})"
+    return f"{REGION_NAMES[code]} ({code}, {city})"
 
 
 MAP_KEY = "region_map"
@@ -335,7 +335,6 @@ if st.button("See Typical Demand Scenario"):
                 "Month",
                 "Day Type",
                 "Time",
-                "Hour",
                 "Apparent Temperature"
             ],
             "Value": [
@@ -343,7 +342,6 @@ if st.button("See Typical Demand Scenario"):
                 month_name,
                 day_type,
                 prediction_time,
-                hour,
                 f"{temperature:.0f} °F"
             ]
         }
@@ -450,7 +448,7 @@ st.pydeck_chart(
     key=MAP_KEY,
 )
 
-st.caption("Click a marker to select that region — stays in sync with the dropdown above.")
+st.caption("Click a marker to select that region. Stays in sync with the dropdown above.")
 
 st.markdown(
     """
