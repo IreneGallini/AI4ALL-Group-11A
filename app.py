@@ -84,6 +84,11 @@ st.set_page_config(
     layout="wide"
 )
 
+st.markdown(
+    "<style>.block-container { padding-top: 1.5rem; }</style>",
+    unsafe_allow_html=True
+)
+
 
 # Load models
 @st.cache_resource
