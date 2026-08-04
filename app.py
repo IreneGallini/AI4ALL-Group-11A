@@ -558,7 +558,7 @@ elif st.session_state.view == "results":
 
             st.altair_chart(
                 (line + point).properties(
-                    title=f"Typical {day_type} Demand — {region}, {month_name}",
+                    title=f"Typical {day_type} Demand: {region}, {month_name}",
                     height=380
                 ),
                 use_container_width=True
