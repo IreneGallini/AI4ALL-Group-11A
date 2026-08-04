@@ -1,12 +1,9 @@
 """
 Streamlit dashboard for AI4ALL Group 11A electricity demand forecasting.
 
-Users can:
-- Select a model (Random Forest or XGBoost)
-- Select a region (dropdown or by clicking the map)
-- Enter month, day type, time, and apparent temperature
-- Get a typical electricity demand scenario, a 24-hour demand profile
-  chart, and a region map colored by predicted demand
+Two-screen flow, toggled via st.session_state.view:
+- "input": model/region/month/day-type/hour/temperature controls
+- "results": compact summary, predicted demand, region map, demand chart
 
 The deployment models use:
 - region
@@ -79,27 +76,12 @@ MAP_KEY = "region_map"
 
 LOW_COLOR = (33, 102, 172)   # blue = lower demand
 HIGH_COLOR = (178, 24, 43)   # red = higher demand
+HIGHLIGHT_COLOR = [255, 215, 0]  # gold outline for the selected region
 
 
 st.set_page_config(
     page_title="Electricity Demand Forecast",
     layout="wide"
-)
-
-
-st.title("Electricity Demand Forecasting")
-
-st.markdown(
-    """
-    Predict hourly electricity demand for major US grid regions
-    using Random Forest and XGBoost models.
-    """
-)
-
-st.caption(
-    "This estimates typical electricity demand based on time of day, day "
-    "of week, season, and temperature. It does not use real-time data or "
-    "weather forecasts."
 )
 
 
@@ -208,111 +190,197 @@ def demand_to_color(value, vmin, vmax):
     return [int(r), int(g), int(b), 200]
 
 
-# User Inputs
-st.header("Forecast Settings")
-
-
-model_choice = st.selectbox(
-    "Choose Model",
-    ["Random Forest", "XGBoost"]
-)
-
-
 regions = list(REGION_COORDS.keys())
 
-st.session_state.setdefault("region", regions[0])
+st.session_state.setdefault("view", "input")
 
-# Apply any pending map click before creating the region widget, so the
-# dropdown and map stay in sync in both directions
+DEFAULT_INPUTS = {
+    "model_choice": "Random Forest",
+    "region": regions[0],
+    "month": MONTHS[0],
+    "day_type": "Weekday",
+    "temp_choice": "Typical",
+}
+
+# Streamlit prunes a widget-tied session_state entry once that widget stops
+# being instantiated for a run (true for every screen-1 input while screen 2
+# is showing) — restore from the plain, never-pruned "saved_inputs" snapshot
+# (written when "See Typical Demand Scenario" is clicked) before screen 1's
+# widgets are (re)created, falling back to hard defaults on first load.
+for key, value in st.session_state.get("saved_inputs", {}).items():
+    st.session_state.setdefault(key, value)
+for key, value in DEFAULT_INPUTS.items():
+    st.session_state.setdefault(key, value)
+
+# Apply any pending map click, so the dropdown, session state, and map stay
+# in sync in both directions — and clicking the map works whether we're on
+# screen 1 or screen 2. Also mirror it into saved_inputs immediately: the
+# region key is itself widget-tied (only the screen-1 selectbox registers
+# it) and gets pruned the same way as the other inputs once screen 1 stops
+# rendering, so saved_inputs — not the raw "region" key — is what survives
+# a later trip back to screen 1 via "Edit Settings".
 map_selection = st.session_state.get(MAP_KEY)
 if map_selection:
     selected_objs = map_selection.get("selection", {}).get("objects", {}).get("region_layer", [])
     if selected_objs:
-        st.session_state["region"] = selected_objs[0]["region"]
+        clicked_region = selected_objs[0]["region"]
+        st.session_state["region"] = clicked_region
+        if "saved_inputs" in st.session_state:
+            st.session_state.saved_inputs["region"] = clicked_region
 
 
-region = st.selectbox(
-    "Choose Region",
-    regions,
-    key="region",
-    format_func=region_label
-)
+# ============================== Screen 1: Input ==============================
+if st.session_state.view == "input":
 
+    st.title("Electricity Demand Forecasting")
 
-month_name = st.selectbox(
-    "Month",
-    MONTHS
-)
-month = MONTHS.index(month_name) + 1
-
-
-day_type = st.radio(
-    "Day Type",
-    ["Weekday", "Weekend"],
-    horizontal=True
-)
-is_weekend = int(day_type == "Weekend")
-day_of_week = (
-    WEEKEND_REPRESENTATIVE_DAY if is_weekend else WEEKDAY_REPRESENTATIVE_DAY
-)
-
-
-prediction_time = st.time_input(
-    "Prediction Time"
-)
-hour = prediction_time.hour
-
-
-st.subheader("Temperature")
-
-temp_stats = load_temperature_stats()
-stats_row = temp_stats.loc[(region, month)]
-typical_temp = float(stats_row["mean"])
-temp_std = float(stats_row["std"]) if pd.notna(stats_row["std"]) else 0.0
-colder_temp = typical_temp - temp_std
-hotter_temp = typical_temp + temp_std
-
-temp_choice = st.radio(
-    "Apparent Temperature",
-    ["Typical", "Colder than usual", "Hotter than usual", "Custom"],
-)
-
-custom_temp = None
-
-if temp_choice == "Typical":
-    temperature = typical_temp
-    st.caption(f"Using {temperature:.0f}°F (historical average for {region} in {month_name})")
-elif temp_choice == "Colder than usual":
-    temperature = colder_temp
-    st.caption(f"Using {temperature:.0f}°F (~1 std dev below the {region} {month_name} average)")
-elif temp_choice == "Hotter than usual":
-    temperature = hotter_temp
-    st.caption(f"Using {temperature:.0f}°F (~1 std dev above the {region} {month_name} average)")
-else:
-    custom_temp = st.slider(
-        "Apparent Temperature (°F)",
-        min_value=-20.0,
-        max_value=110.0,
-        value=typical_temp,
+    st.markdown(
+        "Predict hourly electricity demand for major US grid regions "
+        "using Random Forest and XGBoost models."
     )
-    temperature = custom_temp
-    st.caption(f"Using {temperature:.0f}°F")
+
+    st.caption(
+        "This estimates typical electricity demand based on time of day, day "
+        "of week, season, and temperature. It does not use real-time data or "
+        "weather forecasts."
+    )
+
+    st.header("Forecast Settings")
+
+    row1_col1, row1_col2 = st.columns(2)
+    with row1_col1:
+        model_choice = st.selectbox(
+            "Choose Model",
+            ["Random Forest", "XGBoost"],
+            key="model_choice"
+        )
+    with row1_col2:
+        region = st.selectbox(
+            "Choose Region",
+            regions,
+            key="region",
+            format_func=region_label
+        )
+
+    row2_col1, row2_col2 = st.columns(2)
+    with row2_col1:
+        month_name = st.selectbox(
+            "Month",
+            MONTHS,
+            key="month"
+        )
+    with row2_col2:
+        day_type = st.radio(
+            "Day Type",
+            ["Weekday", "Weekend"],
+            horizontal=True,
+            key="day_type"
+        )
+    month = MONTHS.index(month_name) + 1
+
+    row3_col1, row3_col2 = st.columns(2)
+    with row3_col1:
+        prediction_time = st.time_input(
+            "Prediction Time",
+            key="prediction_time"
+        )
+    with row3_col2:
+        temp_choice = st.radio(
+            "Apparent Temperature",
+            ["Typical", "Colder than usual", "Hotter than usual", "Custom"],
+            key="temp_choice"
+        )
+
+    temp_stats = load_temperature_stats()
+    stats_row = temp_stats.loc[(region, month)]
+    typical_temp = float(stats_row["mean"])
+    temp_std = float(stats_row["std"]) if pd.notna(stats_row["std"]) else 0.0
+    colder_temp = typical_temp - temp_std
+    hotter_temp = typical_temp + temp_std
+
+    if temp_choice == "Typical":
+        temperature = typical_temp
+        st.caption(f"Using {temperature:.0f}°F (historical average for {region} in {month_name})")
+    elif temp_choice == "Colder than usual":
+        temperature = colder_temp
+        st.caption(f"Using {temperature:.0f}°F (~1 std dev below the {region} {month_name} average)")
+    elif temp_choice == "Hotter than usual":
+        temperature = hotter_temp
+        st.caption(f"Using {temperature:.0f}°F (~1 std dev above the {region} {month_name} average)")
+    else:
+        custom_default = st.session_state.get("custom_temp")
+        if custom_default is None:
+            custom_default = typical_temp
+        temperature = st.slider(
+            "Apparent Temperature (°F)",
+            min_value=-20.0,
+            max_value=110.0,
+            value=custom_default,
+            key="custom_temp"
+        )
+        st.caption(f"Using {temperature:.0f}°F")
+
+    if st.button("See Typical Demand Scenario", key="predict_btn", use_container_width=True):
+        saved_inputs = {
+            "model_choice": model_choice,
+            "region": region,
+            "month": month_name,
+            "day_type": day_type,
+            "prediction_time": prediction_time,
+            "temp_choice": temp_choice,
+        }
+        if st.session_state.get("custom_temp") is not None:
+            saved_inputs["custom_temp"] = st.session_state["custom_temp"]
+
+        st.session_state.saved_inputs = saved_inputs
+        st.session_state.view = "results"
+        st.rerun()
 
 
-# Reactive prediction for the currently selected region — used by the
-# chart and (on click) the headline result, so it isn't gated on the button
-if model_choice == "Random Forest":
-    model, features = load_rf_model()
-else:
-    model, features = load_xgb_model()
+# ============================== Screen 2: Results ==============================
+elif st.session_state.view == "results":
 
-prediction = predict_demand(
-    model, features, region, hour, day_of_week, month, is_weekend, temperature
-)
+    # "region" is read live (kept fresh every run by the map-click sync
+    # logic above) rather than from the frozen snapshot, so clicking a
+    # different marker on this screen updates results immediately.
+    region = st.session_state["region"]
 
+    saved = st.session_state.saved_inputs
+    model_choice = saved["model_choice"]
+    month_name = saved["month"]
+    month = MONTHS.index(month_name) + 1
+    day_type = saved["day_type"]
+    is_weekend = int(day_type == "Weekend")
+    day_of_week = (
+        WEEKEND_REPRESENTATIVE_DAY if is_weekend else WEEKDAY_REPRESENTATIVE_DAY
+    )
+    prediction_time = saved["prediction_time"]
+    hour = prediction_time.hour
+    temp_choice = saved["temp_choice"]
+    custom_temp = saved.get("custom_temp")
 
-# Headline result
-if st.button("See Typical Demand Scenario"):
+    temp_stats = load_temperature_stats()
+    temperature = resolve_temperature(region, month, temp_choice, custom_temp, temp_stats)
+
+    summary_col, edit_col = st.columns([5, 1])
+    with summary_col:
+        st.markdown(
+            f"**{model_choice} · {region} · {month_name} · {day_type} · "
+            f"{hour:02d}:00 · {temperature:.0f}°F**"
+        )
+    with edit_col:
+        if st.button("← Edit Settings", key="edit_settings_btn"):
+            st.session_state.view = "input"
+            st.rerun()
+
+    if model_choice == "Random Forest":
+        model, features = load_rf_model()
+    else:
+        model, features = load_xgb_model()
+
+    prediction = predict_demand(
+        model, features, region, hour, day_of_week, month, is_weekend, temperature
+    )
 
     metrics = load_deployment_metrics()
     region_mae = metrics[model_choice]["per_region"][region]["mae"]
@@ -320,144 +388,121 @@ if st.button("See Typical Demand Scenario"):
     prediction_rounded = round(prediction, -1)
     mae_rounded = round(region_mae, -1)
 
-    st.success(
-        f"~{prediction_rounded:,.0f} MWh "
-        f"(typically within ±{mae_rounded:,.0f} MWh)"
-    )
+    st.metric("Predicted Demand", f"~{prediction_rounded:,.0f} MWh")
+    st.caption(f"Typically within ±{mae_rounded:,.0f} MWh for {region}")
 
+    map_col, chart_col = st.columns(2)
 
-    st.subheader("Input Summary")
+    with map_col:
+        map_predictions = []
+        for r in regions:
+            r_temperature = resolve_temperature(r, month, temp_choice, custom_temp, temp_stats)
+            r_prediction = predict_demand(
+                model, features, r, hour, day_of_week, month, is_weekend, r_temperature
+            )
+            city, lat, lon = REGION_COORDS[r]
+            map_predictions.append({
+                "region": r,
+                "region_name": REGION_NAMES[r],
+                "city": city,
+                "lat": lat,
+                "lon": lon,
+                "predicted_demand": r_prediction,
+            })
 
-    summary = pd.DataFrame(
-        {
-            "Feature": [
-                "Region",
-                "Month",
-                "Day Type",
-                "Time",
-                "Apparent Temperature"
-            ],
-            "Value": [
-                region_label(region),
-                month_name,
-                day_type,
-                prediction_time,
-                f"{temperature:.0f} °F"
-            ]
-        }
-    )
+        map_df = pd.DataFrame(map_predictions)
+        vmin = map_df["predicted_demand"].min()
+        vmax = map_df["predicted_demand"].max()
+        map_df["color"] = map_df["predicted_demand"].apply(lambda v: demand_to_color(v, vmin, vmax))
+        is_selected = map_df["region"] == region
+        map_df["radius"] = is_selected.map({True: 70000, False: 45000})
+        map_df["line_color"] = is_selected.apply(lambda sel: HIGHLIGHT_COLOR if sel else [255, 255, 255])
+        map_df["line_width"] = is_selected.map({True: 4, False: 2})
 
-    st.table(summary)
+        region_layer = pdk.Layer(
+            "ScatterplotLayer",
+            id="region_layer",
+            data=map_df,
+            get_position=["lon", "lat"],
+            get_fill_color="color",
+            get_radius="radius",
+            get_line_color="line_color",
+            line_width_min_pixels=2,
+            get_line_width="line_width",
+            stroked=True,
+            pickable=True,
+            auto_highlight=True,
+        )
 
+        label_layer = pdk.Layer(
+            "TextLayer",
+            data=map_df,
+            get_position=["lon", "lat"],
+            get_text="region_name",
+            get_size=14,
+            get_color=[20, 20, 20],
+            get_pixel_offset=[0, -22],
+            get_text_anchor="'middle'",
+            pickable=False,
+        )
 
-# Demand profile chart
-st.header("24-Hour Demand Profile")
+        deck = pdk.Deck(
+            layers=[region_layer, label_layer],
+            initial_view_state=pdk.ViewState(latitude=39, longitude=-98, zoom=3),
+            tooltip={"html": "<b>{region_name}</b> ({region} — {city})<br/>~{predicted_demand} MWh"},
+            map_provider="carto",
+            map_style="light",
+        )
 
-demand_profile = load_demand_profile()
+        st.pydeck_chart(
+            deck,
+            on_select="rerun",
+            selection_mode="single-object",
+            key=MAP_KEY,
+            height=380,
+        )
 
-try:
-    profile_series = demand_profile.loc[(region, month, is_weekend)]
-    profile_df = profile_series.reset_index()
-    profile_df.columns = ["hour", "demand_mwh"]
+        st.caption("Click a marker to select that region.")
 
-    line = alt.Chart(profile_df).mark_line(color="#4C78A8").encode(
-        x=alt.X("hour:Q", title="Hour of Day"),
-        y=alt.Y("demand_mwh:Q", title="Demand (MWh)"),
-        tooltip=[alt.Tooltip("hour:Q", title="Hour"), alt.Tooltip("demand_mwh:Q", title="Avg Demand (MWh)", format=",.0f")],
-    )
+        st.markdown(
+            """
+            <div style="display:flex; align-items:center; gap:8px; max-width:400px;">
+                <span>Lower demand</span>
+                <div style="flex:1; height:12px; border-radius:6px;
+                            background:linear-gradient(to right, rgb(33,102,172), rgb(178,24,43));"></div>
+                <span>Higher demand</span>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-    point_df = pd.DataFrame({"hour": [hour], "demand_mwh": [prediction]})
-    point = alt.Chart(point_df).mark_point(size=180, filled=True, color="#B2182B").encode(
-        x="hour:Q",
-        y="demand_mwh:Q",
-        tooltip=[alt.Tooltip("hour:Q", title="Selected Hour"), alt.Tooltip("demand_mwh:Q", title="Predicted Demand (MWh)", format=",.0f")],
-    )
+    with chart_col:
+        demand_profile = load_demand_profile()
 
-    st.altair_chart(
-        (line + point).properties(
-            title=f"Typical {day_type} Demand — {region}, {month_name}"
-        ),
-        use_container_width=True
-    )
-except KeyError:
-    st.info("Not enough historical data to build a demand profile for this region/month/day type.")
+        try:
+            profile_series = demand_profile.loc[(region, month, is_weekend)]
+            profile_df = profile_series.reset_index()
+            profile_df.columns = ["hour", "demand_mwh"]
 
+            line = alt.Chart(profile_df).mark_line(color="#4C78A8").encode(
+                x=alt.X("hour:Q", title="Hour of Day"),
+                y=alt.Y("demand_mwh:Q", title="Demand (MWh)"),
+                tooltip=[alt.Tooltip("hour:Q", title="Hour"), alt.Tooltip("demand_mwh:Q", title="Avg Demand (MWh)", format=",.0f")],
+            )
 
-# Region map
-st.header("Region Map")
+            point_df = pd.DataFrame({"hour": [hour], "demand_mwh": [prediction]})
+            point = alt.Chart(point_df).mark_point(size=180, filled=True, color="#B2182B").encode(
+                x="hour:Q",
+                y="demand_mwh:Q",
+                tooltip=[alt.Tooltip("hour:Q", title="Selected Hour"), alt.Tooltip("demand_mwh:Q", title="Predicted Demand (MWh)", format=",.0f")],
+            )
 
-map_predictions = []
-for r in regions:
-    r_temperature = resolve_temperature(r, month, temp_choice, custom_temp, temp_stats)
-    r_prediction = predict_demand(
-        model, features, r, hour, day_of_week, month, is_weekend, r_temperature
-    )
-    city, lat, lon = REGION_COORDS[r]
-    map_predictions.append({
-        "region": r,
-        "region_name": REGION_NAMES[r],
-        "city": city,
-        "lat": lat,
-        "lon": lon,
-        "predicted_demand": r_prediction,
-    })
-
-map_df = pd.DataFrame(map_predictions)
-vmin = map_df["predicted_demand"].min()
-vmax = map_df["predicted_demand"].max()
-map_df["color"] = map_df["predicted_demand"].apply(lambda v: demand_to_color(v, vmin, vmax))
-
-region_layer = pdk.Layer(
-    "ScatterplotLayer",
-    id="region_layer",
-    data=map_df,
-    get_position=["lon", "lat"],
-    get_fill_color="color",
-    get_radius=45000,
-    get_line_color=[255, 255, 255],
-    line_width_min_pixels=2,
-    stroked=True,
-    pickable=True,
-    auto_highlight=True,
-)
-
-label_layer = pdk.Layer(
-    "TextLayer",
-    data=map_df,
-    get_position=["lon", "lat"],
-    get_text="region_name",
-    get_size=14,
-    get_color=[20, 20, 20],
-    get_pixel_offset=[0, -22],
-    get_text_anchor="'middle'",
-    pickable=False,
-)
-
-deck = pdk.Deck(
-    layers=[region_layer, label_layer],
-    initial_view_state=pdk.ViewState(latitude=39, longitude=-98, zoom=3),
-    tooltip={"html": "<b>{region_name}</b> ({region} — {city})<br/>~{predicted_demand} MWh"},
-    map_provider="carto",
-    map_style="light",
-)
-
-st.pydeck_chart(
-    deck,
-    on_select="rerun",
-    selection_mode="single-object",
-    key=MAP_KEY,
-)
-
-st.caption("Click a marker to select that region. Stays in sync with the dropdown above.")
-
-st.markdown(
-    """
-    <div style="display:flex; align-items:center; gap:8px; max-width:400px;">
-        <span>Lower demand</span>
-        <div style="flex:1; height:12px; border-radius:6px;
-                    background:linear-gradient(to right, rgb(33,102,172), rgb(178,24,43));"></div>
-        <span>Higher demand</span>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+            st.altair_chart(
+                (line + point).properties(
+                    title=f"Typical {day_type} Demand — {region}, {month_name}",
+                    height=380
+                ),
+                use_container_width=True
+            )
+        except KeyError:
+            st.info("Not enough historical data to build a demand profile for this region/month/day type.")
