@@ -2,11 +2,13 @@ import json
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 import xgboost as xgb
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,20 +30,51 @@ TARGET = "demand_mwh"
 
 
 def evaluate(y_true, y_pred, name):
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = mean_squared_error(y_true, y_pred) ** 0.5
-    r2 = r2_score(y_true, y_pred)
+    y_true_arr = np.asarray(y_true)
+    y_pred_arr = np.asarray(y_pred)
+
+    mae = mean_absolute_error(y_true_arr, y_pred_arr)
+    rmse = mean_squared_error(y_true_arr, y_pred_arr) ** 0.5
+
+    # Exclude zero-demand rows (a handful of bad readings) from MAPE to
+    # avoid division by zero
+    nonzero = y_true_arr != 0
+    mape = float(
+        np.mean(np.abs((y_true_arr[nonzero] - y_pred_arr[nonzero]) / y_true_arr[nonzero]))
+    ) * 100
+
+    r2 = r2_score(y_true_arr, y_pred_arr)
 
     print(f"\n{name}")
     print(f"MAE: {mae:.2f} MWh")
     print(f"RMSE: {rmse:.2f} MWh")
+    print(f"MAPE: {mape:.2f}%")
     print(f"R2: {r2:.4f}")
 
     return {
         "mae": float(mae),
         "rmse": float(rmse),
+        "mape": mape,
         "r2": float(r2),
     }
+
+
+def evaluate_with_per_region(y_true, y_pred, regions, name):
+    overall = evaluate(y_true, y_pred, name)
+
+    y_true_arr = np.asarray(y_true)
+    pred_arr = np.asarray(y_pred)
+    regions_arr = np.asarray(regions)
+
+    per_region = {}
+
+    for region in sorted(set(regions_arr)):
+        mask = regions_arr == region
+        per_region[region] = evaluate(
+            y_true_arr[mask], pred_arr[mask], f"{name} - {region}"
+        )
+
+    return {"overall": overall, "per_region": per_region}
 
 
 def main():
@@ -49,6 +82,10 @@ def main():
     df = pd.read_csv(DATA_PATH, parse_dates=["datetime_utc"])
 
     df = df.sort_values("datetime_utc")
+
+    # Preserve region label before one-hot encoding, for stratification
+    # and per-region metrics
+    region_labels = df["region"]
 
     # One hot encode region
     df = pd.get_dummies(
@@ -74,20 +111,24 @@ def main():
         subset=features + [TARGET]
     )
 
-    # Last 20% is future test data
-    split = int(len(df) * 0.8)
+    region_labels = region_labels.loc[df.index]
 
-    train = df.iloc[:split]
-    test = df.iloc[split:]
+    X = df[features]
+    y = df[TARGET]
 
-    X_train = train[features]
-    y_train = train[TARGET]
+    # Random stratified split (by region) rather than chronological, since
+    # these features have no lag/sequential dependency
+    X_train, X_test, y_train, y_test, region_train, region_test = train_test_split(
+        X,
+        y,
+        region_labels,
+        test_size=0.2,
+        stratify=region_labels,
+        random_state=42,
+    )
 
-    X_test = test[features]
-    y_test = test[TARGET]
-
-    print("Training rows:", len(train))
-    print("Testing rows:", len(test))
+    print("Training rows:", len(X_train))
+    print("Testing rows:", len(X_test))
 
     # Random Forest
     rf = RandomForestRegressor(
@@ -101,9 +142,10 @@ def main():
 
     rf_pred = rf.predict(X_test)
 
-    rf_metrics = evaluate(
+    rf_metrics = evaluate_with_per_region(
         y_test,
         rf_pred,
+        region_test,
         "Random Forest"
     )
 
@@ -130,9 +172,10 @@ def main():
 
     xgb_pred = xgb_model.predict(X_test)
 
-    xgb_metrics = evaluate(
+    xgb_metrics = evaluate_with_per_region(
         y_test,
         xgb_pred,
+        region_test,
         "XGBoost"
     )
 
