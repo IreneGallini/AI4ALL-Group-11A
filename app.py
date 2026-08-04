@@ -129,10 +129,13 @@ def load_temperature_stats():
 def load_demand_profile():
     df = pd.read_csv(
         WEATHER_DATA_PATH,
-        usecols=["region", "month", "is_weekend", "hour", "demand_mwh"]
+        usecols=["region", "month", "is_weekend", "hour",
+                 "demand_mwh", "solar_gen_mwh", "wind_gen_mwh"]
     )
 
-    return df.groupby(["region", "month", "is_weekend", "hour"])["demand_mwh"].mean()
+    return df.groupby(["region", "month", "is_weekend", "hour"])[
+        ["demand_mwh", "solar_gen_mwh", "wind_gen_mwh"]
+    ].mean()
 
 
 def resolve_temperature(target_region, month, temp_choice, custom_value, temp_stats):
@@ -391,6 +394,23 @@ elif st.session_state.view == "results":
     st.metric("Predicted Demand", f"~{prediction_rounded:,.0f} MWh")
     st.caption(f"Typically within ±{mae_rounded:,.0f} MWh for {region}")
 
+    METRIC_DEFS = [
+        ("MAE", "mae", "{:.0f} MWh", "On average, predictions are off by this many MWh."),
+        ("MAPE", "mape", "{:.1f}%", "On average, predictions are off by this percentage of actual demand."),
+        ("R²", "r2", "{:.3f}", "How much of the variation in demand this model explains, closer to 1 is better."),
+    ]
+
+    with st.expander("What do these numbers mean?"):
+        region_metrics = metrics[model_choice].get("per_region", {}).get(
+            region, metrics[model_choice].get("overall", {})
+        )
+        definitions_table = pd.DataFrame({
+            "Metric": [label for label, *_ in METRIC_DEFS],
+            "Value": [fmt.format(region_metrics[key]) for _, key, fmt, _ in METRIC_DEFS],
+            "What it means": [text for *_, text in METRIC_DEFS],
+        })
+        st.table(definitions_table)
+
     map_col, chart_col = st.columns(2)
 
     with map_col:
@@ -476,25 +496,64 @@ elif st.session_state.view == "results":
             unsafe_allow_html=True
         )
 
+        compare_options = ["None"] + [r for r in regions if r != region]
+        if st.session_state.get("compare_region") not in compare_options:
+            st.session_state["compare_region"] = "None"
+        compare_choice = st.selectbox(
+            "Compare to another region",
+            compare_options,
+            key="compare_region",
+            format_func=lambda r: "None" if r == "None" else region_label(r)
+        )
+        compare_region = None if compare_choice == "None" else compare_choice
+
     with chart_col:
         demand_profile = load_demand_profile()
 
         try:
-            profile_series = demand_profile.loc[(region, month, is_weekend)]
-            profile_df = profile_series.reset_index()
-            profile_df.columns = ["hour", "demand_mwh"]
+            primary_row = demand_profile.loc[(region, month, is_weekend)]
+            primary_df = primary_row.reset_index()
+            primary_long = primary_df.melt(
+                id_vars="hour",
+                value_vars=["demand_mwh", "solar_gen_mwh", "wind_gen_mwh"],
+                var_name="series",
+                value_name="value",
+            )
+            primary_long["series"] = primary_long["series"].map({
+                "demand_mwh": f"{region} Demand",
+                "solar_gen_mwh": "Solar Generation",
+                "wind_gen_mwh": "Wind Generation",
+            })
 
-            line = alt.Chart(profile_df).mark_line(color="#4C78A8").encode(
+            domain = [f"{region} Demand", "Solar Generation", "Wind Generation"]
+            color_range = ["#4C78A8", "#F2C94C", "#54A24B"]
+            dash_range = [[1, 0], [6, 3], [1, 3]]
+            combined_long = primary_long
+
+            if compare_region:
+                compare_row = demand_profile.loc[(compare_region, month, is_weekend)]
+                compare_df = compare_row.reset_index()[["hour", "demand_mwh"]]
+                compare_df["series"] = f"{compare_region} Demand"
+                compare_df = compare_df.rename(columns={"demand_mwh": "value"})
+                combined_long = pd.concat([primary_long, compare_df], ignore_index=True)
+
+                domain.append(f"{compare_region} Demand")
+                color_range.append("#9467BD")
+                dash_range.append([1, 0])
+
+            line = alt.Chart(combined_long).mark_line().encode(
                 x=alt.X("hour:Q", title="Hour of Day"),
-                y=alt.Y("demand_mwh:Q", title="Demand (MWh)"),
-                tooltip=[alt.Tooltip("hour:Q", title="Hour"), alt.Tooltip("demand_mwh:Q", title="Avg Demand (MWh)", format=",.0f")],
+                y=alt.Y("value:Q", title="MWh"),
+                color=alt.Color("series:N", scale=alt.Scale(domain=domain, range=color_range), title=None, legend=alt.Legend(orient="bottom", columns=2)),
+                strokeDash=alt.StrokeDash("series:N", scale=alt.Scale(domain=domain, range=dash_range), legend=None),
+                tooltip=[alt.Tooltip("series:N", title="Series"), alt.Tooltip("hour:Q", title="Hour"), alt.Tooltip("value:Q", title="MWh", format=",.0f")],
             )
 
-            point_df = pd.DataFrame({"hour": [hour], "demand_mwh": [prediction]})
+            point_df = pd.DataFrame({"hour": [hour], "value": [prediction]})
             point = alt.Chart(point_df).mark_point(size=180, filled=True, color="#B2182B").encode(
                 x="hour:Q",
-                y="demand_mwh:Q",
-                tooltip=[alt.Tooltip("hour:Q", title="Selected Hour"), alt.Tooltip("demand_mwh:Q", title="Predicted Demand (MWh)", format=",.0f")],
+                y="value:Q",
+                tooltip=[alt.Tooltip("hour:Q", title="Selected Hour"), alt.Tooltip("value:Q", title="Predicted Demand (MWh)", format=",.0f")],
             )
 
             st.altair_chart(
