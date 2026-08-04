@@ -94,11 +94,16 @@ def main():
     mae = mean_absolute_error(y_test, predictions)
     r2 = r2_score(y_test, predictions)
     
+    mape = np.mean(
+        np.abs((y_test - predictions) / y_test)
+    ) * 100
+    
     print("\nLinear Regression Future Forecast Results: ")
     print(f"Rows tested: {len(test):,}")
     print(f"R² Score: {r2:.4f}")
     print(f"RMSE: {rmse:.2f} MWh")
     print(f"MAE: {mae:.2f} MWh")
+    print(f"MAPE: {mape:.2f}%")
     
     
     # Plot a bar chart of feature importance
