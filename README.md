@@ -132,6 +132,38 @@ needed: `models/` and `data/processed/eia_with_features.csv` are both committed,
 clone has everything required to serve predictions without rerunning the pipeline.
 `EIA_API_KEY` only becomes relevant once a live-refresh feature is built.
 
-## Known limitations
-- `app.py` is currently a minimal stub (metrics comparison only) — see the TODO docstring at the top of that file for the full planned scope.
-- Models are trained on a static baseline snapshot (`data/processed/eia_with_features.csv`); there's no live data refresh yet.
+## Bias and Responsible AI Considerations
+
+Our model has several potential sources of bias:
+
+- **Regional reliability bias:** Model performance varies across grid regions. Some regions have less reliable predictions than others, meaning a single overall performance metric may not represent every region equally.
+
+- **Weather proxy bias:** We use one representative city to represent each grid region. This may not capture local weather differences, especially in larger regions that cover multiple states.
+
+- **Training data bias:** The model was trained on approximately one year of data, which may not include enough examples of rare events such as extreme weather conditions or unusual demand patterns.
+
+These limitations should be considered when interpreting model predictions. The model is designed for regional electricity demand forecasting and may not perform equally across all locations or conditions.
+
+## References
+
+- U.S. Energy Information Administration. (2024). *EIA Grid Monitor*.  
+  https://www.eia.gov/electricity/gridmonitor/
+
+- Open-Meteo. (2024). *Historical Weather API*.  
+  https://open-meteo.com/en/docs/historical-weather-api
+
+- Bourdeau, M., et al. (2019). *Modeling and forecasting building energy consumption: A review of data-driven techniques*. Sustainable Cities and Society, 48, 101533.  
+  https://doi.org/10.1016/j.scs.2019.101533
+
+- Salman, S. (2025). *Seasonal forecasting of the hourly electricity demand applying machine and deep learning algorithms*. Scientific Reports.  
+  https://www.nature.com/articles/s41598-025-91878-0
+
+- DNV. (2024). *Transforming grid operations with accurate short-term energy predictions*.  
+  https://www.dnv.com/article/transforming-grid-operations-with-accurate-short-term-energy-predictions/
+
+- Pedregosa et al. (2011). *Scikit-learn: Machine Learning in Python*. Journal of Machine Learning Research.
+
+- Chen & Guestrin (2016). *XGBoost: A Scalable Tree Boosting System*. KDD.
+
+- Streamlit Inc. *Streamlit*.  
+  https://streamlit.io/
